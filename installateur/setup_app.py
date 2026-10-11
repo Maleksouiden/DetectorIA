@@ -10,6 +10,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 import urllib.request
 from pathlib import Path
 
@@ -112,8 +113,105 @@ def _torch_index() -> str:
     return "https://download.pytorch.org/whl/cu126"
 
 
-def _run(cmd: list[str], log) -> int:
-    log("$ " + " ".join(cmd))
+def format_eta(seconds: float) -> str:
+    seconds = int(max(0, seconds))
+    if seconds < 5:
+        return "quelques secondes"
+    if seconds < 60:
+        return f"{seconds} s"
+    minutes, rest = divmod(seconds, 60)
+    if minutes < 60:
+        if rest and minutes < 10:
+            return f"{minutes} min {rest:02d} s"
+        return f"{minutes} min"
+    hours, minutes = divmod(minutes, 60)
+    return f"{hours} h {minutes:02d} min"
+
+
+def human_size(amount: float) -> str:
+    value = float(max(0, amount))
+    for unit in ("o", "Ko", "Mo", "Go"):
+        if value < 1024 or unit == "Go":
+            if unit == "o":
+                return f"{int(value)} o"
+            return f"{value:.1f} {unit}".replace(".", ",")
+        value /= 1024
+    return f"{int(amount)} o"
+
+
+class Reporter:
+    """Avance la barre selon l'étape, puis selon les octets du fichier en cours."""
+
+    def __init__(self, emit):
+        self.emit = emit
+        self.start = 0.0
+        self.end = 1.0
+        self.floor = 0.0
+        self.single = False
+        self.label = ""
+        self.clock_total: int | None = None
+        self.clock_t: float | None = None
+        self.clock_base = 0
+        self.shown = 0.0
+
+    def stage(self, start: float, end: float, label: str, single: bool = False) -> None:
+        self.start = start
+        self.end = end
+        self.floor = start
+        self.shown = start
+        self.single = single
+        self.label = label
+        self.clock_total = None
+        self.clock_t = None
+        self._show(start, label)
+
+    def __call__(self, text: str) -> None:
+        line = str(text).strip()
+        if not line:
+            return
+        match = re.search(r"Progress\s+(\d+)\s+of\s+(\d+)", line)
+        if match:
+            self.file_progress(int(match.group(1)), int(match.group(2)))
+            return
+        self.emit(line)
+
+    def file_progress(self, current: int, total: int) -> None:
+        if total <= 0:
+            return
+        now = time.monotonic()
+        if self.clock_total != total:
+            self.floor = self.shown
+            self.clock_total = total
+            self.clock_t = now
+            self.clock_base = current
+        fraction = min(1.0, current / total)
+        if self.single:
+            percent = self.start + (self.end - self.start) * fraction
+        else:
+            percent = self.floor + (self.end - self.floor) * fraction * 0.8
+        percent = max(self.shown, percent)
+        self.shown = percent
+        eta = ""
+        elapsed = now - (self.clock_t or now)
+        done = current - self.clock_base
+        if done > 0 and elapsed >= 1 and current < total:
+            eta = format_eta(elapsed * (total - current) / done)
+        detail = f"{self.label} — {human_size(current)} / {human_size(total)}"
+        if eta:
+            detail += f" — il reste {eta}"
+        self._show(percent, detail)
+
+    def _show(self, percent: float, detail: str) -> None:
+        self.emit(("progress", max(0.0, min(100.0, percent)), detail))
+
+
+def _pip(python: Path, args: list[str]) -> list[str]:
+    # --progress-bar est une option de « install », pas une option générale de pip.
+    return [str(python), "-m", "pip", "--disable-pip-version-check", *args, "--progress-bar", "raw"]
+
+
+def _run(cmd: list[str], reporter: Reporter) -> int:
+    reporter("$ " + " ".join(cmd))
     proc = subprocess.Popen(
         cmd,
         stdout=subprocess.PIPE,
@@ -125,7 +223,7 @@ def _run(cmd: list[str], log) -> int:
     )
     assert proc.stdout is not None
     for line in proc.stdout:
-        log(line.rstrip("\n"))
+        reporter(line.rstrip("\n"))
     return proc.wait()
 
 
@@ -153,7 +251,11 @@ def _download_python(log) -> Path:
         dest = Path(tempfile.gettempdir()) / name
         log(f"Téléchargement de Python : {name}")
         try:
-            urllib.request.urlretrieve(url, dest)
+            def hook(count, block, total, reporter=log):
+                if hasattr(reporter, "file_progress"):
+                    reporter.file_progress(count * block, total or 0)
+
+            urllib.request.urlretrieve(url, dest, reporthook=hook)
         except OSError as exc:
             last_error = str(exc)
             log(last_error)
@@ -244,32 +346,35 @@ def _desktop_dir() -> Path:
     return Path.home() / "Desktop"
 
 
-def install(log) -> Path:
+def install(reporter: Reporter) -> Path:
     payload = _payload_dir()
     dest = _install_dir()
-    log("Copie des fichiers…")
-    _copy_payload(payload, dest, log)
-    python = _ensure_python(log)
+    reporter.stage(0, 8, "Copie des fichiers")
+    _copy_payload(payload, dest, reporter)
+    reporter.stage(8, 18, "Python", single=True)
+    python = _ensure_python(reporter)
     venv_python = dest / "venv" / "Scripts" / "python.exe"
+    reporter.stage(18, 24, "Environnement Python")
     if not venv_python.is_file():
-        log("Création de l'environnement Python…")
-        code = _run([str(python), "-m", "venv", str(dest / "venv")], log)
+        code = _run([str(python), "-m", "venv", str(dest / "venv")], reporter)
         if code != 0 or not venv_python.is_file():
             raise RuntimeError("La création de l'environnement Python a échoué.")
-    log("Installation des bibliothèques. Cette étape peut durer plusieurs minutes.")
-    code = _run([str(venv_python), "-m", "pip", "install", "--upgrade", "pip"], log)
+    reporter.stage(24, 32, "Mise à jour de pip")
+    code = _run([str(venv_python), "-m", "pip", "install", "--upgrade", "pip"], reporter)
     if code != 0:
         raise RuntimeError("La mise à jour de pip a échoué.")
-    code = _run([str(venv_python), "-m", "pip", "install", "-r", str(dest / "requirements.txt")], log)
+    reporter.stage(32, 58, "Bibliothèques du programme")
+    code = _run(_pip(venv_python, ["install", "-r", str(dest / "requirements.txt")]), reporter)
     if code != 0:
         raise RuntimeError("L'installation des bibliothèques a échoué.")
+    reporter.stage(58, 96, "PyTorch", single=True)
     code = _run(
-        [
-            str(venv_python), "-m", "pip", "install", "torch",
+        _pip(venv_python, [
+            "install", "torch",
             "--index-url", _torch_index(),
             "--extra-index-url", "https://pypi.org/simple",
-        ],
-        log,
+        ]),
+        reporter,
     )
     if code != 0:
         raise RuntimeError("L'installation de PyTorch a échoué.")
@@ -277,11 +382,11 @@ def install(log) -> Path:
     exe = dest / "DetectorIA.exe"
     if not exe.is_file():
         raise RuntimeError("Le lanceur DetectorIA.exe est absent du paquet d'installation.")
-    log("Création des icônes…")
+    reporter.stage(96, 100, "Icônes du bureau et du menu Démarrer")
     _shortcut(_desktop_dir() / f"{APP_NAME}.lnk", exe, dest, icon)
     start_menu = Path(os.environ["APPDATA"]) / "Microsoft" / "Windows" / "Start Menu" / "Programs"
     _shortcut(start_menu / f"{APP_NAME}.lnk", exe, dest, icon)
-    log("Installation terminée.")
+    reporter.stage(100, 100, "Installation terminée")
     return exe
 
 
@@ -303,8 +408,14 @@ class Setup(tk.Tk):
         ).pack(anchor="w", pady=(4, 0))
         self.log = tk.Text(self, height=16, wrap="word", font=("Consolas", 9))
         self.log.pack(fill="both", expand=True, padx=16, pady=8)
-        self.bar = ttk.Progressbar(self, mode="indeterminate")
-        self.bar.pack(fill="x", padx=16)
+        status = ttk.Frame(self)
+        status.pack(fill="x", padx=16)
+        self.detail = ttk.Label(status, text="En attente")
+        self.detail.pack(side="left")
+        self.pct = ttk.Label(status, text="0 %", width=8, anchor="e")
+        self.pct.pack(side="right")
+        self.bar = ttk.Progressbar(self, mode="determinate", maximum=100)
+        self.bar.pack(fill="x", padx=16, pady=(4, 0))
         buttons = ttk.Frame(self)
         buttons.pack(fill="x", padx=16, pady=12)
         self.install_btn = ttk.Button(buttons, text="Installer", command=self.start)
@@ -315,7 +426,7 @@ class Setup(tk.Tk):
         self.after(80, self._poll)
         self._write(
             "L'original de vos documents n'est jamais modifié.\n"
-            "PyTorch et les modèles peuvent peser plus d'un gigaoctet.\n"
+            "PyTorch est téléchargé ici. Les modèles d'IA se téléchargent au lancement de l'application.\n"
             "L'usage du logiciel relève de votre responsabilité (voir DROITS.md).\n"
         )
 
@@ -328,13 +439,24 @@ class Setup(tk.Tk):
             while True:
                 item = self.messages.get_nowait()
                 if item == ("done", 0):
-                    self.bar.stop()
+                    self.bar["value"] = 100
+                    self.pct.config(text="100 %")
+                    self.detail.config(text="Installation terminée")
                     self.install_btn.config(state="disabled")
                     self.open_btn.config(state="normal")
                     self._write("Vous pouvez lancer Détecteur IA depuis l'icône du bureau.")
-                    messagebox.showinfo(APP_NAME, "Installation terminée.\nUne icône a été ajoutée sur le bureau.")
+                    messagebox.showinfo(
+                        APP_NAME,
+                        "Installation terminée.\nUne icône a été ajoutée sur le bureau.\n\n"
+                        "Au premier lancement, les modèles d'IA se téléchargent dans l'application, "
+                        "avec l'avancement et le temps restant.",
+                    )
+                elif isinstance(item, tuple) and item[0] == "progress":
+                    percent = float(item[1])
+                    self.bar["value"] = percent
+                    self.pct.config(text=f"{percent:.0f} %")
+                    self.detail.config(text=str(item[2]))
                 elif isinstance(item, tuple) and item[0] == "done":
-                    self.bar.stop()
                     self.install_btn.config(state="normal")
                     messagebox.showerror(APP_NAME, item[1])
                 else:
@@ -353,11 +475,11 @@ class Setup(tk.Tk):
         if not agreed:
             return
         self.install_btn.config(state="disabled")
-        self.bar.start(12)
+        self.bar["value"] = 0
 
         def worker():
             try:
-                self.exe = install(self.messages.put)
+                self.exe = install(Reporter(self.messages.put))
                 self.messages.put(("done", 0))
             except Exception as exc:  # noqa: BLE001
                 self.messages.put(("done", f"{type(exc).__name__}: {exc}"))

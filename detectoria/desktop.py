@@ -14,6 +14,7 @@ import webview
 
 from detectoria.config import find_model, load_config, save_config
 from detectoria.detector import Detector
+from detectoria.models_download import ensure_repo, human_size, repo_size
 from detectoria.pdf_analysis import analyse_document, output_path_for, write_reformulations
 from detectoria.reformulate import Reformulator
 
@@ -87,11 +88,12 @@ class Api:
         self.result: dict | None = None
         self.detector: Detector | None = None
         self.reformulator: Reformulator | None = None
+        self._preparing = False
 
     def initial_state(self) -> dict:
         current = find_model(self.cfg["detectors"], self.cfg.get("active_detector", ""))
         return {
-            "gpu": _gpu_label(),
+            "gpu": "Détection du processeur…",
             "threshold": round(float(self.cfg["threshold"]) * 100),
             "reformulate": bool(self.cfg.get("reformulate_after_detection")),
             "models": [{"label": m["label"], "note": m.get("note", "")} for m in self.cfg["detectors"]],
@@ -135,6 +137,13 @@ class Api:
         if self.busy or not (self.result and self.result.get("findings")):
             return {"ok": False}
         self._start(True, findings_only=True)
+        return {"ok": True}
+
+    def prepare_models(self) -> dict:
+        if self._preparing:
+            return {"ok": True}
+        self._preparing = True
+        threading.Thread(target=self._prepare_worker, daemon=True).start()
         return {"ok": True}
 
     def stop(self) -> None:
@@ -334,15 +343,14 @@ class Api:
         if self.detector is not None:
             self.detector.close()
             self.detector = None
-        self._emit("progress", 0, f"Chargement de {spec.get('label', spec.get('hf_id'))}…")
-        self._emit("setIndeterminate", True)
+        self._fetch_repos([(spec.get("hf_id", ""), spec.get("label") or spec.get("hf_id", ""))])
+        self._emit("progress", 100, f"Chargement de {spec.get('label', spec.get('hf_id'))} en mémoire…", "")
         self.detector = Detector(
             spec,
             device=options["device"],
             batch_size=int(options["batch_size"]),
-            log=lambda msg: self._emit("progress", 0, msg),
+            log=lambda msg: self._emit("progress", 100, msg, ""),
         )
-        self._emit("setIndeterminate", False)
 
     def _load_reformulator(self, spec: dict, options: dict) -> None:
         same = (
@@ -356,10 +364,49 @@ class Api:
         if self.reformulator is not None:
             self.reformulator.close()
             self.reformulator = None
-        self._emit("progress", 0, f"Chargement du reformulateur {spec.get('label', '')}…")
-        self._emit("setIndeterminate", True)
-        self.reformulator = Reformulator(spec, device=options["device"], log=lambda msg: self._emit("progress", 0, msg))
-        self._emit("setIndeterminate", False)
+        self._fetch_repos([(spec.get("hf_id", ""), spec.get("label") or spec.get("hf_id", ""))])
+        self._emit("progress", 100, f"Chargement du reformulateur {spec.get('label', '')} en mémoire…", "")
+        self.reformulator = Reformulator(spec, device=options["device"], log=lambda msg: self._emit("progress", 100, msg, ""))
+
+    def _prepare_worker(self) -> None:
+        try:
+            self._emit("setGpu", _gpu_label())
+            jobs = []
+            detector = find_model(self.cfg["detectors"], self.cfg.get("active_detector", ""))
+            if detector and detector.get("hf_id"):
+                jobs.append((detector["hf_id"], detector.get("label") or detector["hf_id"]))
+            if self.cfg.get("reformulate_after_detection"):
+                reformulator = find_model(self.cfg["reformulators"], self.cfg.get("active_reformulator", ""))
+                if reformulator and reformulator.get("hf_id"):
+                    jobs.append((reformulator["hf_id"], reformulator.get("label") or reformulator["hf_id"]))
+            if not jobs:
+                self._emit("progress", 100, "Prêt. Choisissez un document.", "")
+                return
+            self._fetch_repos(jobs)
+            self._emit("progress", 100, "Modèles prêts. Choisissez un document.", "")
+        except Exception as exc:  # noqa: BLE001
+            self._emit("showError", f"Le téléchargement du modèle a échoué.\n\n{type(exc).__name__}: {exc}")
+        finally:
+            self._preparing = False
+
+    def _fetch_repos(self, jobs: list[tuple[str, str]]) -> None:
+        cache = self.cfg.get("cache_dir") or ""
+        sizes = [max(repo_size(repo_id), 1) for repo_id, _label in jobs]
+        total_size = sum(sizes) or 1
+        done = 0
+        for (repo_id, label), size in zip(jobs, sizes):
+            base = done
+
+            def on_progress(fraction, current, total, eta, base=base, size=size, label=label):
+                overall = (base + min(1.0, fraction) * size) / total_size * 100
+                detail = f"Téléchargement de {label}"
+                if total:
+                    detail += f" — {human_size(current)} / {human_size(total)}"
+                self._emit("progress", overall, detail, eta or "")
+
+            self._emit("progress", base / total_size * 100, f"Téléchargement de {label}…", "")
+            ensure_repo(repo_id, cache, on_progress)
+            done += size
 
     def _report(self) -> str:
         result = self.result or {}

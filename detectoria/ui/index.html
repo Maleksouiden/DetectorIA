@@ -267,10 +267,11 @@ function setButtons(){
   $("exp").disabled=!ok;
   $("rf").disabled=!(ok&&$("reform").checked&&passages.some(p=>p.flagged));
 }
-function progress(p,m){
+function setGpu(label){ $("gpu").textContent=label||""; }
+function progress(p,m,eta){
   $("fill").classList.remove("ind");
   $("fill").style.width=Math.max(0,Math.min(100,p))+"%";
-  $("pct").textContent=Math.round(p)+" %";
+  $("pct").textContent=Math.round(p)+" %"+(eta?" · reste "+eta:"");
   $("msg").textContent=m;
 }
 function setIndeterminate(on){
@@ -426,6 +427,8 @@ async function boot(){
   $("reform").checked=!!s.reformulate;
   fillModels(s.models, s.active);
   setButtons();
+  progress(0,"Téléchargement des modèles d'IA…");
+  pywebview.api.prepare_models();
 }
 window.addEventListener("pywebviewready", boot);
 if(window.pywebview) boot();
