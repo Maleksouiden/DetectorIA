@@ -12,6 +12,8 @@ Les résultats sont indicatifs. Ils ne constituent pas une preuve.
 
 L'installateur place le programme dans votre dossier personnel. Les droits administrateur ne sont pas nécessaires. PyTorch est téléchargé pendant l'installation. Le modèle d'analyse est téléchargé au premier lancement de l'analyse.
 
+À chaque ouverture, l'application installée compare sa version avec la branche `main` du dépôt. Si une mise à jour est publiée, elle est téléchargée et l'application redémarre. Les réglages déjà enregistrés sont conservés.
+
 ## Utilisation
 
 1. Choisissez un PDF ou un document Word (`.docx`).

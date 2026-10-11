@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import subprocess
 import sys
 import threading
 import traceback
@@ -17,6 +18,7 @@ from detectoria.detector import Detector
 from detectoria.models_download import ensure_repo, human_size, repo_size
 from detectoria.pdf_analysis import analyse_document, output_path_for, write_reformulations
 from detectoria.reformulate import Reformulator
+from detectoria.updater import check_and_install, installed_root
 
 UI = Path(__file__).resolve().parent / "ui" / "index.html"
 
@@ -89,6 +91,7 @@ class Api:
         self.detector: Detector | None = None
         self.reformulator: Reformulator | None = None
         self._preparing = False
+        self._updating = False
 
     def initial_state(self) -> dict:
         current = find_model(self.cfg["detectors"], self.cfg.get("active_detector", ""))
@@ -138,6 +141,24 @@ class Api:
             return {"ok": False}
         self._start(True, findings_only=True)
         return {"ok": True}
+
+    def check_update(self) -> dict:
+        if self._updating or self.busy:
+            return {"ok": False}
+        self._updating = True
+        threading.Thread(target=self._update_worker, daemon=True).start()
+        return {"ok": True}
+
+    def restart_app(self) -> None:
+        root = installed_root()
+        if root is None:
+            return
+        exe = root / "DetectorIA.exe"
+        if exe.is_file():
+            subprocess.Popen([str(exe)], cwd=str(root))
+        if self.window is not None:
+            self.window.destroy()
+        os._exit(0)
 
     def prepare_models(self) -> dict:
         if self._preparing:
@@ -367,6 +388,18 @@ class Api:
         self._fetch_repos([(spec.get("hf_id", ""), spec.get("label") or spec.get("hf_id", ""))])
         self._emit("progress", 100, f"Chargement du reformulateur {spec.get('label', '')} en mémoire…", "")
         self.reformulator = Reformulator(spec, device=options["device"], log=lambda msg: self._emit("progress", 100, msg, ""))
+
+    def _update_worker(self) -> None:
+        try:
+            state = check_and_install(lambda percent, message: self._emit("progress", percent, message, ""))
+            if state == "updated":
+                self._emit("updateReady")
+            elif state == "current":
+                self._emit("progress", 0, "Prêt. Choisissez un document.", "")
+        except Exception:
+            self._emit("progress", 0, "Prêt. Choisissez un document.", "")
+        finally:
+            self._updating = False
 
     def _prepare_worker(self) -> None:
         try:

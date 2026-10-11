@@ -10,6 +10,7 @@ from pathlib import Path
 from docx import Document
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
+from docx.shared import Pt
 from docx.text.paragraph import Paragraph
 
 from detectoria.pdf_analysis import french_ratio, make_chunks, verdict
@@ -117,7 +118,7 @@ def write_docx_reformulations(path: str, findings: list[dict]) -> None:
     written = [item for item in findings if (item.get("reformulation") or "").strip()]
     if written:
         doc.add_page_break()
-        doc.add_heading(REFORM_HEADING, level=1)
+        _add_title(doc, REFORM_HEADING)
         note = doc.add_paragraph(
             "Ces formulations sont des propositions. Elles ne prouvent pas qu’un texte est humain."
         )
@@ -129,6 +130,14 @@ def write_docx_reformulations(path: str, findings: list[dict]) -> None:
             run.bold = True
             doc.add_paragraph((item.get("reformulation") or "").strip())
     doc.save(path)
+
+
+def _add_title(doc, text: str) -> None:
+    """Certains documents n'ont pas le style Word « Heading 1 »."""
+    paragraph = doc.add_paragraph()
+    run = paragraph.add_run(text)
+    run.bold = True
+    run.font.size = Pt(16)
 
 
 def _iter_paragraphs(doc):

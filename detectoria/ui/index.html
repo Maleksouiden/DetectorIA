@@ -268,6 +268,10 @@ function setButtons(){
   $("rf").disabled=!(ok&&$("reform").checked&&passages.some(p=>p.flagged));
 }
 function setGpu(label){ $("gpu").textContent=label||""; }
+function updateReady(){
+  progress(100,"Mise à jour installée. L'application redémarre.");
+  setTimeout(()=>pywebview.api.restart_app(), 900);
+}
 function progress(p,m,eta){
   $("fill").classList.remove("ind");
   $("fill").style.width=Math.max(0,Math.min(100,p))+"%";
@@ -427,8 +431,8 @@ async function boot(){
   $("reform").checked=!!s.reformulate;
   fillModels(s.models, s.active);
   setButtons();
-  progress(0,"Téléchargement des modèles d'IA…");
-  pywebview.api.prepare_models();
+  progress(0,"Prêt. Choisissez un document.");
+  pywebview.api.check_update();
 }
 window.addEventListener("pywebviewready", boot);
 if(window.pywebview) boot();
