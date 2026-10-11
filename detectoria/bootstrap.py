@@ -18,6 +18,7 @@ REQUIREMENTS = APP_DIR / "requirements.txt"
 
 CHECKS = (
     ("fitz", "pymupdf"),
+    ("docx", "python-docx"),
     ("transformers", "transformers"),
     ("sentencepiece", "sentencepiece"),
     ("torch", "torch"),

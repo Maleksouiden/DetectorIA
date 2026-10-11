@@ -16,12 +16,12 @@ from tkinter import filedialog, messagebox, ttk
 from detectoria import __version__
 from detectoria.config import CONFIG_PATH, find_model, load_config, save_config
 from detectoria.detector import Detector
-from detectoria.pdf_analysis import analyse_pdf, output_path_for, write_reformulations
+from detectoria.pdf_analysis import analyse_document, output_path_for, write_reformulations
 from detectoria.reformulate import Reformulator
 
 HELP = """\
-Choisir un PDF
-    Ouvre l'explorateur. Le fichier d'origine n'est jamais modifié.
+Choisir un document
+    Ouvre l'explorateur (PDF ou Word .docx). Le fichier d'origine n'est jamais modifié.
 
 Seuil
     80 % par défaut. Plus il est haut, moins il y a de faux positifs.
@@ -32,7 +32,9 @@ Analyser
     Le texte est découpé en passages d'environ 170 mots, de préférence
     en fin de paragraphe. Les titres, en-têtes, pieds de page, sommaires
     et tableaux de chiffres sont ignorés.
-    Une copie nom_analyse_IA.pdf est créée, avec les passages surlignés.
+    Une copie nom_analyse_IA.pdf ou nom_analyse_IA.docx est créée, avec les passages surlignés.
+    Dans Word, le jaune correspond au seuil, le rouge au seuil « très probable ».
+    Les reformulations sont ajoutées à la fin de la copie Word.
     Le résumé indique le pourcentage de mots signalés.
 
 Langue
@@ -100,8 +102,8 @@ class App(tk.Tk):
     def _menu(self) -> None:
         bar = tk.Menu(self)
         file_menu = tk.Menu(bar, tearoff=0)
-        file_menu.add_command(label="Choisir un PDF…", command=self.choose)
-        file_menu.add_command(label="Ouvrir le PDF surligné", command=self.open_out)
+        file_menu.add_command(label="Choisir un document…", command=self.choose)
+        file_menu.add_command(label="Ouvrir la copie surlignée", command=self.open_out)
         file_menu.add_command(label="Enregistrer le PDF sous…", command=self.save_as)
         file_menu.add_command(label="Exporter le rapport…", command=self.export_report)
         file_menu.add_separator()
@@ -128,13 +130,13 @@ class App(tk.Tk):
         ttk.Label(header, text="Détecteur de texte IA", style="Title.TLabel").pack(anchor="w")
         ttk.Label(
             header,
-            text="PDF en français · surlignage dans une copie · modèles configurables",
+            text="PDF ou Word en français · surlignage dans une copie · modèles configurables",
             style="Muted.TLabel",
         ).pack(anchor="w")
 
         top = ttk.Frame(self)
         top.pack(fill="x", **pad)
-        ttk.Button(top, text="Choisir un PDF…", command=self.choose).pack(side="left")
+        ttk.Button(top, text="Choisir un document…", command=self.choose).pack(side="left")
         self.file_lbl = ttk.Label(top, text="Aucun fichier sélectionné", style="Muted.TLabel")
         self.file_lbl.pack(side="left", padx=12)
 
@@ -178,7 +180,7 @@ class App(tk.Tk):
         self.stop_btn.pack(side="left", padx=6)
         self.reform_btn = ttk.Button(act, text="Reformuler", command=self.reformulate_only, state="disabled")
         self.reform_btn.pack(side="left", padx=6)
-        self.open_btn = ttk.Button(act, text="Ouvrir le PDF surligné", command=self.open_out, state="disabled")
+        self.open_btn = ttk.Button(act, text="Ouvrir la copie surlignée", command=self.open_out, state="disabled")
         self.open_btn.pack(side="left", padx=6)
         self.save_btn = ttk.Button(act, text="Enregistrer sous…", command=self.save_as, state="disabled")
         self.save_btn.pack(side="left")
@@ -187,7 +189,7 @@ class App(tk.Tk):
 
         self.progress = ttk.Progressbar(self, mode="determinate")
         self.progress.pack(fill="x", padx=14, pady=4)
-        self.status = ttk.Label(self, text="Prêt. Choisissez un PDF pour commencer.", style="Status.TLabel")
+        self.status = ttk.Label(self, text="Prêt. Choisissez un PDF ou un document Word.", style="Status.TLabel")
         self.status.pack(fill="x", padx=14)
         self.summary = ttk.Label(self, text="", font=("Segoe UI", 11, "bold"), wraplength=940, justify="left")
         self.summary.pack(fill="x", padx=14, pady=(8, 2))
@@ -254,7 +256,10 @@ class App(tk.Tk):
         self.model_note.config(text=model.get("note", "") if model else "")
 
     def choose(self) -> None:
-        path = filedialog.askopenfilename(title="Choisir un PDF", filetypes=[("PDF", "*.pdf")])
+        path = filedialog.askopenfilename(
+            title="Choisir un document",
+            filetypes=[("Documents", "*.pdf *.docx"), ("PDF", "*.pdf"), ("Word", "*.docx")],
+        )
         if not path:
             return
         self.pdf_path = path
@@ -322,7 +327,7 @@ class App(tk.Tk):
                 def prog(done, total, msg):
                     self.q.put(("progress", 100 * done / max(total, 1), msg))
 
-                result = analyse_pdf(path, self.detector, options, str(dest), prog, self.cancel)
+                result = analyse_document(path, self.detector, options, str(dest), prog, self.cancel)
             else:
                 result = dict(self.result or {})
                 result["findings"] = findings
@@ -437,12 +442,18 @@ class App(tk.Tk):
             self.status.config(text="Analyse interrompue.")
         if result.get("analysed_words", 0) == 0 and not result.get("cancelled"):
             self.summary.config(text="Aucun texte exploitable.")
-            self.status.config(text="Le PDF ne contient pas assez de texte sélectionnable.")
+            if (self.pdf_path or "").lower().endswith(".docx"):
+                self.status.config(text="Le document Word ne contient pas assez de texte suivi.")
+                detail = "Il faut des paragraphes assez longs. Les titres très courts sont ignorés."
+            else:
+                self.status.config(text="Le PDF ne contient pas assez de texte sélectionnable.")
+                detail = (
+                    "Si le PDF est un scan (images), faites d'abord une reconnaissance de caractères, "
+                    "par exemple : ocrmypdf entree.pdf sortie.pdf."
+                )
             messagebox.showwarning(
                 "Pas de texte",
-                "Aucun passage assez long n'a pu être analysé.\n\n"
-                "Si le PDF est un scan (images), faites d'abord une reconnaissance de caractères, "
-                "par exemple : ocrmypdf entree.pdf sortie.pdf.",
+                "Aucun passage assez long n'a pu être analysé.\n\n" + detail,
             )
             return
 
@@ -474,7 +485,7 @@ class App(tk.Tk):
                 reform = reform[:220] + "…"
             self.reform_tree.insert("", "end", iid=f"r{index}", values=(finding["page"], f"{finding['prob']:.0%}", reform or "—"), tags=(tag,))
         if self.out_path and not result.get("cancelled"):
-            self.status.config(text=f"PDF surligné enregistré : {self.out_path}")
+            self.status.config(text=f"Copie surlignée enregistrée : {self.out_path}")
         if result.get("french_ratio", 1) < 0.08 and result.get("analysed_words", 0):
             messagebox.showwarning(
                 "Langue",
@@ -529,9 +540,11 @@ class App(tk.Tk):
     def save_as(self) -> None:
         if not self.out_path:
             return
+        ext = Path(self.out_path).suffix.lower() or ".pdf"
+        kind = ("Word", "*.docx") if ext == ".docx" else ("PDF", "*.pdf")
         dest = filedialog.asksaveasfilename(
-            defaultextension=".pdf",
-            filetypes=[("PDF", "*.pdf")],
+            defaultextension=ext,
+            filetypes=[kind],
             initialfile=Path(self.out_path).name,
         )
         if dest:
@@ -560,11 +573,12 @@ class App(tk.Tk):
             self.calib.cget("text"),
             result.get("verdict", ""),
             f"Mots signalés : {result.get('flagged_words', 0)}/{result.get('analysed_words', 0)} ({result.get('share', 0):.0%})",
-            f"PDF surligné : {self.out_path or ''}",
+            f"Copie surlignée : {self.out_path or ''}",
             "",
         ]
+        place = "Paragraphe" if (self.pdf_path or "").lower().endswith(".docx") else "Page"
         for finding in self.findings:
-            lines.append(f"--- Page {finding['page']} · {finding['prob']:.0%} · {finding['words']} mots ---")
+            lines.append(f"--- {place} {finding['page']} · {finding['prob']:.0%} · {finding['words']} mots ---")
             lines.append(finding["text"])
             if finding.get("reformulation"):
                 lines.append("")

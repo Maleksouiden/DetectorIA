@@ -91,7 +91,7 @@ footer{grid-column:1/-1;background:var(--mark-soft);border-radius:12px;padding:1
   <header>
     <div>
       <h1>Détecteur de texte IA</h1>
-      <p class="sub">Analysez un PDF en français et surlignez les passages suspects dans une copie.</p>
+      <p class="sub">Analysez un PDF ou un document Word en français et surlignez les passages suspects dans une copie.</p>
     </div>
     <div class="head-actions">
       <button class="badge" id="settings" type="button">Réglages</button>
@@ -105,7 +105,7 @@ footer{grid-column:1/-1;background:var(--mark-soft);border-radius:12px;padding:1
         <label class="t">Document</label>
         <div class="drop" id="drop" role="button" tabindex="0">
           <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/></svg>
-          <div><b id="fname">Choisir un PDF</b><span id="fsub">Cliquez ou déposez un fichier ici</span></div>
+          <div><b id="fname">Choisir un document</b><span id="fsub">PDF ou Word (.docx)</span></div>
         </div>
       </div>
 
@@ -137,7 +137,7 @@ footer{grid-column:1/-1;background:var(--mark-soft);border-radius:12px;padding:1
         <button class="btn primary" id="go" type="button" disabled>Analyser</button>
         <button class="btn stop" id="stop" type="button" disabled>Arrêter</button>
         <button class="btn" id="rf" type="button" disabled>Reformuler</button>
-        <button class="btn" id="open" type="button" disabled>Ouvrir le PDF surligné</button>
+        <button class="btn" id="open" type="button" disabled>Ouvrir la copie surlignée</button>
         <button class="btn" id="save" type="button" disabled>Enregistrer sous…</button>
         <button class="btn" id="exp" type="button" disabled style="grid-column:1/-1">Exporter le rapport</button>
       </div>
@@ -225,7 +225,7 @@ footer{grid-column:1/-1;background:var(--mark-soft);border-radius:12px;padding:1
 <script>
 const $=id=>document.getElementById(id);
 let tab="p", done=false, running=false, hasFile=false, hasOut=false;
-let passages=[], analysedWords=0;
+let passages=[], analysedWords=0, placeLabel="Page";
 
 function seuil(){return +$("seuil").value}
 function rows(){return passages.filter(r=>Math.round(r.prob*100)>=seuil())}
@@ -234,10 +234,10 @@ function esc(s){return String(s??"").replace(/[&<>]/g,c=>({"&":"&amp;","<":"&lt;
 function render(){
   const v=$("view");
   if(tab==="p"){
-    if(!done){v.innerHTML='<div class="empty"><b>Aucun résultat pour l’instant</b>Choisissez un PDF puis lancez l’analyse.</div>';return}
+    if(!done){v.innerHTML='<div class="empty"><b>Aucun résultat pour l’instant</b>Choisissez un PDF ou un document Word, puis lancez l’analyse.</div>';return}
     const r=rows();
     if(!r.length){v.innerHTML='<div class="empty"><b>Aucun passage au-dessus du seuil</b>Baissez le seuil pour voir des passages moins probables.</div>';return}
-    v.innerHTML='<table><thead><tr><th>Page</th><th>Probabilité IA</th><th>Mots</th><th>Passage signalé</th></tr></thead><tbody>'+
+    v.innerHTML='<table><thead><tr><th>'+esc(placeLabel)+'</th><th>Probabilité IA</th><th>Mots</th><th>Passage signalé</th></tr></thead><tbody>'+
       r.map(x=>{
         const pr=Math.round(x.prob*100);
         return `<tr><td class="n">${x.page}</td><td><div class="prob"><i style="width:${Math.max(8,pr*0.6)}px"></i><b class="n">${pr} %</b></div></td><td class="n">${x.words}</td><td class="passage"><mark>${esc(x.text)}</mark></td></tr>`;
@@ -245,7 +245,7 @@ function render(){
   }else{
     const r=rows().filter(x=>x.reformulation);
     if(!r.length){v.innerHTML='<div class="empty"><b>Aucune reformulation</b>Cochez l’option avant l’analyse, ou cliquez sur « Reformuler ».</div>';return}
-    v.innerHTML='<table><thead><tr><th>Page</th><th>Original</th><th>Reformulation proposée</th></tr></thead><tbody>'+
+    v.innerHTML='<table><thead><tr><th>'+esc(placeLabel)+'</th><th>Original</th><th>Reformulation proposée</th></tr></thead><tbody>'+
       r.map(x=>`<tr><td class="n">${x.page}</td><td class="passage"><mark>${esc(x.text)}</mark></td><td>${esc(x.reformulation)}</td></tr>`).join("")+"</tbody></table>";
   }
 }
@@ -309,13 +309,14 @@ function showResult(data){
   setIndeterminate(false);
   passages=data.passages||[];
   analysedWords=data.analysed_words||0;
+  placeLabel=data.place_label||"Page";
   done=analysedWords>0;
   hasOut=!!data.out_path;
   $("calib").textContent=data.calibration||"";
   if(data.cancelled) progress(data.analysed_words?100:0, "Analyse interrompue.");
   else if(!analysedWords){
-    progress(0,"Le PDF ne contient pas assez de texte sélectionnable.");
-    alert("Aucun passage assez long n’a pu être analysé.\n\nSi le PDF est un scan, faites d’abord une reconnaissance de caractères.");
+    progress(0, data.message||"Le document ne contient pas assez de texte.");
+    alert("Aucun passage assez long n’a pu être analysé.\n\n"+(data.empty_detail||""));
   }else{
     progress(100, data.message||"Analyse terminée.");
     if(data.french_warning){
@@ -350,7 +351,7 @@ $("drop").addEventListener("drop",async e=>{
   e.preventDefault();
   const f=e.dataTransfer&&e.dataTransfer.files&&e.dataTransfer.files[0];
   const path=f&&(f.path||f.pywebviewFullPath);
-  if(path&&/\.pdf$/i.test(f.name||path)){
+  if(path&&/\.(pdf|docx)$/i.test(f.name||path)){
     const file=await pywebview.api.use_pdf(path);
     if(file) acceptFile(file);
   }else if(window.pywebview){

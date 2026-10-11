@@ -5,3 +5,8 @@ venv/
 *.pdf
 logs/
 .huggingface/
+build/
+dist/
+installateur/payload/
+installateur/build/
+installateur/dist/

@@ -107,16 +107,18 @@ def verdict(share: float) -> str:
     return "La majorité du texte est signalée"
 
 
-def output_path_for(pdf_path: str) -> Path:
-    source = Path(pdf_path)
-    dest = source.with_name(source.stem + "_analyse_IA.pdf")
+def output_path_for(source_path: str) -> Path:
+    source = Path(source_path)
+    ext = source.suffix if source.suffix else ".pdf"
+    name = source.stem + "_analyse_IA" + ext
+    dest = source.with_name(name)
     try:
         dest.parent.mkdir(exist_ok=True)
         with dest.open("ab"):
             pass
         return dest
     except OSError:
-        return Path.home() / (source.stem + "_analyse_IA.pdf")
+        return Path.home() / name
 
 
 def analyse_pdf(pdf_path, detector, options: dict, out_path, progress=lambda *a: None, cancel: threading.Event | None = None):
@@ -201,12 +203,33 @@ def analyse_pdf(pdf_path, detector, options: dict, out_path, progress=lambda *a:
         "cancelled": stopped,
         "model_label": getattr(detector, "spec", {}).get("label", ""),
         "calibration": getattr(detector, "calibration", ""),
+        "kind": "pdf",
+        "place_label": "Page",
     }
 
 
+def analyse_document(path, detector, options: dict, out_path, progress=lambda *a: None, cancel: threading.Event | None = None):
+    suffix = Path(path).suffix.lower()
+    if suffix == ".docx":
+        from detectoria.docx_analysis import analyse_docx
+
+        return analyse_docx(path, detector, options, out_path, progress, cancel)
+    if suffix == ".doc":
+        raise RuntimeError(
+            "Les anciens fichiers .doc ne sont pas lus. "
+            "Enregistrez le document au format .docx, puis relancez l'analyse."
+        )
+    return analyse_pdf(path, detector, options, out_path, progress, cancel)
+
+
 def write_reformulations(pdf_path: str, findings: list[dict]) -> None:
-    """Ajoute la reformulation dans l'infobulle de chaque surlignage, sans toucher au PDF source."""
+    """Ajoute la reformulation dans la copie analysée, sans toucher au fichier source."""
     if not pdf_path or not findings:
+        return
+    if str(pdf_path).lower().endswith(".docx"):
+        from detectoria.docx_analysis import write_docx_reformulations
+
+        write_docx_reformulations(pdf_path, findings)
         return
     doc = pymupdf.open(pdf_path)
     try:

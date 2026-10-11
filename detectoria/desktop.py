@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import sys
 import threading
 import traceback
 from pathlib import Path
@@ -13,10 +14,22 @@ import webview
 
 from detectoria.config import find_model, load_config, save_config
 from detectoria.detector import Detector
-from detectoria.pdf_analysis import analyse_pdf, output_path_for, write_reformulations
+from detectoria.pdf_analysis import analyse_document, output_path_for, write_reformulations
 from detectoria.reformulate import Reformulator
 
 UI = Path(__file__).resolve().parent / "ui" / "index.html"
+
+
+def _empty_message(result: dict) -> str:
+    if result.get("kind") == "docx":
+        return "Le document Word ne contient pas assez de texte suivi."
+    return "Le PDF ne contient pas assez de texte sélectionnable."
+
+
+def _empty_detail(result: dict) -> str:
+    if result.get("kind") == "docx":
+        return "Il faut des paragraphes assez longs. Les titres très courts sont ignorés."
+    return "Si le PDF est un scan, faites d’abord une reconnaissance de caractères."
 
 
 def _gpu_label() -> str:
@@ -90,7 +103,7 @@ class Api:
             return None
         picked = self.window.create_file_dialog(
             webview.OPEN_DIALOG,
-            file_types=("PDF (*.pdf)",),
+            file_types=("Documents (*.pdf;*.docx)", "PDF (*.pdf)", "Word (*.docx)"),
         )
         path = _one_path(picked)
         if not path:
@@ -138,15 +151,17 @@ class Api:
         source = (self.result or {}).get("out_path")
         if not source or self.window is None:
             return
+        ext = Path(source).suffix.lower() or ".pdf"
+        kind = "Word (*.docx)" if ext == ".docx" else "PDF (*.pdf)"
         dest = _one_path(self.window.create_file_dialog(
             webview.SAVE_DIALOG,
             save_filename=Path(source).name,
-            file_types=("PDF (*.pdf)",),
+            file_types=(kind,),
         ))
         if not dest:
             return
-        if not dest.lower().endswith(".pdf"):
-            dest += ".pdf"
+        if not dest.lower().endswith(ext):
+            dest += ext
         shutil.copyfile(source, dest)
         self._emit("progress", 100, f"Copie enregistrée : {dest}")
 
@@ -242,7 +257,7 @@ class Api:
             if not findings_only:
                 self._load_detector(spec, options)
                 dest = output_path_for(path)
-                result = analyse_pdf(
+                result = analyse_document(
                     path,
                     self.detector,
                     options,
@@ -270,9 +285,9 @@ class Api:
             if result.get("cancelled"):
                 message = "Analyse interrompue."
             elif not result.get("analysed_words"):
-                message = "Le PDF ne contient pas assez de texte sélectionnable."
+                message = _empty_message(result)
             elif result.get("out_path"):
-                message = "Analyse terminée. PDF surligné : " + Path(result["out_path"]).name
+                message = "Analyse terminée. Copie surlignée : " + Path(result["out_path"]).name
             else:
                 message = "Analyse terminée."
             self._emit("showResult", self._public_result(result, message))
@@ -301,6 +316,9 @@ class Api:
             "calibration": result.get("calibration") or "",
             "french_warning": (result.get("french_ratio") or 1) < 0.08 and analysed > 0,
             "message": message,
+            "kind": result.get("kind") or "pdf",
+            "place_label": result.get("place_label") or "Page",
+            "empty_detail": _empty_detail(result),
         }
 
     def _load_detector(self, spec: dict, options: dict) -> None:
@@ -352,11 +370,12 @@ class Api:
             result.get("calibration") or "",
             result.get("verdict") or "",
             f"Mots signalés : {result.get('flagged_words', 0)}/{result.get('analysed_words', 0)} ({result.get('share', 0):.0%})",
-            f"PDF surligné : {result.get('out_path') or ''}",
+            f"Copie surlignée : {result.get('out_path') or ''}",
             "",
         ]
+        place = "Paragraphe" if result.get("kind") == "docx" else "Page"
         for finding in result.get("findings") or []:
-            lines.append(f"--- Page {finding['page']} · {finding['prob']:.0%} · {finding['words']} mots ---")
+            lines.append(f"--- {place} {finding['page']} · {finding['prob']:.0%} · {finding['words']} mots ---")
             lines.append(finding["text"])
             if finding.get("reformulation"):
                 lines.append("")
@@ -373,7 +392,35 @@ class Api:
         self.window.evaluate_js(f"{name}.apply(null, {raw})")
 
 
+def _icon_file() -> Path | None:
+    root = Path(__file__).resolve().parent.parent
+    for candidate in (root / "app.ico", root / "installateur" / "app.ico"):
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def _set_windows_icon(title: str, icon: Path) -> None:
+    import ctypes
+
+    user32 = ctypes.windll.user32
+    hwnd = user32.FindWindowW(None, title)
+    if not hwnd:
+        return
+    handle = user32.LoadImageW(None, str(icon), 1, 0, 0, 0x0010)
+    if not handle:
+        return
+    user32.SendMessageW(hwnd, 0x0080, 1, handle)
+    user32.SendMessageW(hwnd, 0x0080, 0, handle)
+
+
 def main() -> None:
+    if sys.platform == "win32":
+        import ctypes
+        try:
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("DetectorIA.Desktop")
+        except Exception:
+            pass
     api = Api()
     window = webview.create_window(
         "Détecteur de texte IA",
@@ -386,4 +433,7 @@ def main() -> None:
         text_select=True,
     )
     api.window = window
+    icon = _icon_file()
+    if icon is not None and sys.platform == "win32":
+        window.events.shown += lambda: _set_windows_icon("Détecteur de texte IA", icon)
     webview.start()
