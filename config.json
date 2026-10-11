@@ -1,0 +1,68 @@
+{
+  "threshold": 0.79,
+  "strong_prob": 0.95,
+  "min_words": 40,
+  "target_words": 170,
+  "max_words": 300,
+  "batch_size": 8,
+  "device": "auto",
+  "cache_dir": "",
+  "color_suspect": [
+    1.0,
+    0.72,
+    0.25
+  ],
+  "color_strong": [
+    1.0,
+    0.45,
+    0.45
+  ],
+  "highlight_opacity": 0.45,
+  "active_detector": "camemberta",
+  "active_reformulator": "flan-t5-base",
+  "reformulate_after_detection": true,
+  "detectors": [
+    {
+      "id": "camemberta",
+      "hf_id": "almanach/camemberta-chatgptdetect-noisy",
+      "label": "CamemBERTa (Inria, français)",
+      "note": "Meilleur choix pour un document en français. Entraîné par l'Inria (ALMAnaCH) sur des réponses ChatGPT, avec fautes et homoglyphes. Environ 450 Mo.",
+      "force_ai_label_id": null
+    },
+    {
+      "id": "xlmr",
+      "hf_id": "almanach/xlmr-chatgptdetect-noisy",
+      "label": "XLM-RoBERTa (Inria, français + anglais)",
+      "note": "Même équipe, entraîné sur le français et l'anglais. Utile si le PDF mélange les deux langues. Un peu moins spécialisé que CamemBERTa sur du français seul.",
+      "force_ai_label_id": null
+    }
+  ],
+  "reformulators": [
+    {
+      "id": "flan-t5-base",
+      "hf_id": "CATIE-AQ/french_paraphrase_flan-t5-base",
+      "label": "Flan-T5 base (français, recommandé)",
+      "note": "Paraphraseur français du CATIE (2025), 250 millions de paramètres. Bon compromis qualité / taille.",
+      "prompt": "{text}",
+      "max_words_per_call": 60,
+      "max_new_tokens": 220,
+      "num_beams": 4,
+      "repetition_penalty": 1.15,
+      "no_repeat_ngram_size": 3,
+      "length_penalty": 1.05
+    },
+    {
+      "id": "flan-t5-large",
+      "hf_id": "CATIE-AQ/french_paraphrase_flan-t5-large",
+      "label": "Flan-T5 large (français, un peu meilleur)",
+      "note": "Même entraînement, modèle plus grand (environ 800 millions de paramètres). Légèrement meilleur, beaucoup plus lourd à télécharger.",
+      "prompt": "{text}",
+      "max_words_per_call": 60,
+      "max_new_tokens": 220,
+      "num_beams": 4,
+      "repetition_penalty": 1.15,
+      "no_repeat_ngram_size": 3,
+      "length_penalty": 1.05
+    }
+  ]
+}

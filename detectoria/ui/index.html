@@ -1,0 +1,434 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Détecteur de texte IA</title>
+<link href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#EEF1F4; --panel:#FFFFFF; --ink:#14282E; --muted:#5B6B72; --line:#D9E0E5;
+  --brand:#164E57; --brand-ink:#FFFFFF; --mark:#FFD84D; --mark-soft:#FFF3BF;
+  --danger:#B4432F; --ok:#2F7D5B; --track:#E3E9ED;
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%}
+body{background:var(--bg);color:var(--ink);font:15px/1.5 "Schibsted Grotesk",system-ui,-apple-system,"Segoe UI",sans-serif}
+button,select,input{font:inherit;color:inherit}
+:focus-visible{outline:3px solid var(--brand);outline-offset:2px}
+.app{max-width:1180px;margin:0 auto;padding:20px;display:grid;grid-template-columns:340px 1fr;gap:20px;min-height:100%}
+header{grid-column:1/-1;display:flex;align-items:center;justify-content:space-between;gap:16px}
+h1{margin:0;font-size:26px;letter-spacing:-.02em;font-weight:700}
+h2{margin:0;font-size:20px;letter-spacing:-.02em}
+.sub{color:var(--muted);margin:2px 0 0}
+.head-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.badge{font-size:13px;color:var(--muted);border:1px solid var(--line);border-radius:999px;padding:4px 12px;background:var(--panel)}
+button.badge{cursor:pointer}
+button.badge:hover{border-color:var(--brand);color:var(--ink)}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:18px}
+aside .card{display:flex;flex-direction:column;gap:20px}
+label.t{display:block;font-weight:600;margin-bottom:6px}
+.hint{color:var(--muted);font-size:13px;margin:6px 0 0}
+.drop{display:flex;align-items:center;gap:12px;border:1.5px dashed var(--line);border-radius:12px;padding:14px;cursor:pointer;background:var(--bg);transition:border-color .15s}
+.drop:hover,.drop.on{border-color:var(--brand)}
+.drop svg{flex:none;color:var(--brand)}
+.drop b{display:block;overflow-wrap:anywhere}
+.drop span{color:var(--muted);font-size:13px}
+select,input[type=number],input[type=text]{width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:var(--panel)}
+.range-row{display:flex;align-items:center;gap:12px}
+input[type=range]{flex:1;accent-color:var(--brand)}
+.val{font-weight:700;font-variant-numeric:tabular-nums;min-width:48px;text-align:right}
+.check{display:flex;gap:10px;align-items:flex-start;cursor:pointer}
+.check input{margin-top:4px;width:18px;height:18px;accent-color:var(--brand)}
+.btns{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.btn{border:1px solid var(--line);background:var(--panel);border-radius:10px;padding:10px 12px;cursor:pointer;font-weight:500}
+.btn:hover:not(:disabled){border-color:var(--brand)}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.btn.primary{grid-column:1/-1;background:var(--brand);color:var(--brand-ink);border-color:var(--brand);font-weight:600;padding:12px}
+.btn.stop{color:var(--danger)}
+main{display:flex;flex-direction:column;gap:16px;min-width:0}
+.status{display:flex;flex-direction:column;gap:10px}
+.status-top{display:flex;justify-content:space-between;gap:12px;font-size:14px}
+#msg{color:var(--muted)}
+#pct{font-weight:700;font-variant-numeric:tabular-nums}
+.track{height:10px;border-radius:99px;background:var(--track);overflow:hidden}
+.fill{height:100%;width:0;background:var(--brand);border-radius:99px;transition:width .25s}
+.fill.ind{width:40%;animation:load 1s ease-in-out infinite alternate}
+@keyframes load{from{width:12%}to{width:70%}}
+.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+.stat{padding:14px 16px;border:1px solid var(--line);border-radius:12px;background:var(--panel)}
+.stat b{display:block;font-size:24px;font-variant-numeric:tabular-nums;letter-spacing:-.02em}
+.stat span{color:var(--muted);font-size:13px}
+.tabs{display:flex;gap:4px;border-bottom:1px solid var(--line);margin:-4px -18px 0;padding:0 18px}
+.tab{background:none;border:0;padding:10px 14px;cursor:pointer;color:var(--muted);font-weight:500;border-bottom:3px solid transparent;margin-bottom:-1px}
+.tab[aria-selected=true]{color:var(--ink);border-color:var(--mark)}
+.table-wrap{overflow:auto;margin-top:8px;max-height:calc(100vh - 420px)}
+table{width:100%;border-collapse:collapse;min-width:560px}
+th{text-align:left;font-weight:600;font-size:13px;color:var(--muted);padding:10px 8px;border-bottom:1px solid var(--line)}
+td{padding:12px 8px;border-bottom:1px solid var(--line);vertical-align:top}
+td.n{font-variant-numeric:tabular-nums;white-space:nowrap}
+.passage mark{background:linear-gradient(transparent 12%,var(--mark) 12%,var(--mark) 92%,transparent 92%);color:inherit;padding:0 2px}
+.prob{display:flex;align-items:center;gap:8px;min-width:110px}
+.prob i{display:block;height:6px;border-radius:9px;background:var(--danger);flex:none}
+.empty{padding:48px 16px;text-align:center;color:var(--muted)}
+.empty b{display:block;color:var(--ink);margin-bottom:4px}
+footer{grid-column:1/-1;background:var(--mark-soft);border-radius:12px;padding:12px 16px;font-size:13px;color:var(--ink)}
+.modal{position:fixed;inset:0;background:rgba(20,40,46,.38);display:flex;align-items:flex-start;justify-content:center;padding:36px 16px;z-index:5}
+.modal[hidden]{display:none}
+.sheet{width:min(520px,100%);max-height:calc(100vh - 72px);overflow:auto;display:flex;flex-direction:column;gap:12px}
+.row2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+#calib:empty{display:none}
+@media (max-width:860px){
+  .app{grid-template-columns:1fr;padding:14px}
+  .stats{grid-template-columns:1fr}
+  header{flex-direction:column;align-items:flex-start}
+}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <div>
+      <h1>Détecteur de texte IA</h1>
+      <p class="sub">Analysez un PDF en français et surlignez les passages suspects dans une copie.</p>
+    </div>
+    <div class="head-actions">
+      <button class="badge" id="settings" type="button">Réglages</button>
+      <span class="badge" id="gpu">Détection du processeur…</span>
+    </div>
+  </header>
+
+  <aside>
+    <div class="card">
+      <div>
+        <label class="t">Document</label>
+        <div class="drop" id="drop" role="button" tabindex="0">
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/></svg>
+          <div><b id="fname">Choisir un PDF</b><span id="fsub">Cliquez ou déposez un fichier ici</span></div>
+        </div>
+      </div>
+
+      <div>
+        <label class="t" for="model">Modèle</label>
+        <select id="model">
+          <option>CamemBERTa (Inria, français)</option>
+          <option>XLM-RoBERTa (Inria, français + anglais)</option>
+        </select>
+        <p class="hint" id="mdesc">Meilleur choix pour un document en français. Entraîné par l’Inria (ALMAnaCH) sur des réponses ChatGPT. Environ 450 Mo.</p>
+      </div>
+
+      <div>
+        <label class="t" for="seuil">Seuil de détection</label>
+        <div class="range-row">
+          <input type="range" id="seuil" min="50" max="99" value="80">
+          <span class="val" id="seuilv">80 %</span>
+        </div>
+        <p class="hint">Plus il est haut, moins il y a de faux positifs.</p>
+      </div>
+
+      <label class="check">
+        <input type="checkbox" id="reform">
+        <span>Reformuler les passages signalés après l’analyse
+          <span class="hint" style="display:block;margin-top:2px">Télécharge le modèle de paraphrase au premier usage.</span></span>
+      </label>
+
+      <div class="btns">
+        <button class="btn primary" id="go" type="button" disabled>Analyser</button>
+        <button class="btn stop" id="stop" type="button" disabled>Arrêter</button>
+        <button class="btn" id="rf" type="button" disabled>Reformuler</button>
+        <button class="btn" id="open" type="button" disabled>Ouvrir le PDF surligné</button>
+        <button class="btn" id="save" type="button" disabled>Enregistrer sous…</button>
+        <button class="btn" id="exp" type="button" disabled style="grid-column:1/-1">Exporter le rapport</button>
+      </div>
+    </div>
+  </aside>
+
+  <main>
+    <section class="card status" aria-live="polite">
+      <div class="status-top"><span id="msg">En attente d’un document.</span><span id="pct">0 %</span></div>
+      <div class="track"><div class="fill" id="fill"></div></div>
+      <span class="hint" id="calib" style="margin:0"></span>
+    </section>
+
+    <div class="stats">
+      <div class="stat"><b id="s1">–</b><span>Passages signalés</span></div>
+      <div class="stat"><b id="s2">–</b><span>Part du texte concernée</span></div>
+      <div class="stat"><b id="s3">–</b><span>Probabilité moyenne</span></div>
+    </div>
+
+    <section class="card">
+      <div class="tabs" role="tablist">
+        <button class="tab" role="tab" aria-selected="true" data-t="p" type="button">Passages signalés</button>
+        <button class="tab" role="tab" aria-selected="false" data-t="r" type="button">Reformulations</button>
+      </div>
+      <div class="table-wrap" id="view"></div>
+    </section>
+  </main>
+
+  <footer>
+    Indicatif uniquement : un détecteur se trompe, surtout sur un texte très formel ou un modèle récent. La reformulation est une autre façon d’écrire le passage, pas une preuve et pas un moyen de masquer l’origine du texte.
+  </footer>
+</div>
+
+<div id="modal" class="modal" hidden>
+  <form class="card sheet" id="sheet">
+    <h2>Réglages</h2>
+    <div>
+      <label class="t" for="set-device">Appareil</label>
+      <select id="set-device">
+        <option value="auto">Automatique (GPU s’il existe)</option>
+        <option value="cuda">GPU (CUDA)</option>
+        <option value="cpu">Processeur</option>
+      </select>
+    </div>
+    <div class="row2">
+      <div>
+        <label class="t" for="set-strong">Seuil rouge (%)</label>
+        <input id="set-strong" type="number" min="80" max="99" step="1">
+      </div>
+      <div>
+        <label class="t" for="set-batch">Taille des lots</label>
+        <input id="set-batch" type="number" min="1" max="32" step="1">
+      </div>
+    </div>
+    <div class="row2">
+      <div>
+        <label class="t" for="set-min">Mots minimum</label>
+        <input id="set-min" type="number" min="10" step="1">
+      </div>
+      <div>
+        <label class="t" for="set-target">Taille cible</label>
+        <input id="set-target" type="number" min="20" step="1">
+      </div>
+    </div>
+    <div>
+      <label class="t" for="set-max">Taille maximale d’un passage</label>
+      <input id="set-max" type="number" min="40" step="1">
+    </div>
+    <div>
+      <label class="t" for="set-reform">Modèle de reformulation</label>
+      <select id="set-reform"></select>
+    </div>
+    <div>
+      <label class="t" for="set-hf">Ajouter un modèle Hugging Face</label>
+      <input id="set-hf" type="text" placeholder="organisation/nom-du-modele" autocomplete="off">
+      <p class="hint">Classifieur de séquences. Le nom affiché reprend l’identifiant.</p>
+    </div>
+    <div class="btns">
+      <button class="btn" id="set-cancel" type="button">Annuler</button>
+      <button class="btn primary" type="submit">Enregistrer</button>
+    </div>
+  </form>
+</div>
+
+<script>
+const $=id=>document.getElementById(id);
+let tab="p", done=false, running=false, hasFile=false, hasOut=false;
+let passages=[], analysedWords=0;
+
+function seuil(){return +$("seuil").value}
+function rows(){return passages.filter(r=>Math.round(r.prob*100)>=seuil())}
+function esc(s){return String(s??"").replace(/[&<>]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]))}
+
+function render(){
+  const v=$("view");
+  if(tab==="p"){
+    if(!done){v.innerHTML='<div class="empty"><b>Aucun résultat pour l’instant</b>Choisissez un PDF puis lancez l’analyse.</div>';return}
+    const r=rows();
+    if(!r.length){v.innerHTML='<div class="empty"><b>Aucun passage au-dessus du seuil</b>Baissez le seuil pour voir des passages moins probables.</div>';return}
+    v.innerHTML='<table><thead><tr><th>Page</th><th>Probabilité IA</th><th>Mots</th><th>Passage signalé</th></tr></thead><tbody>'+
+      r.map(x=>{
+        const pr=Math.round(x.prob*100);
+        return `<tr><td class="n">${x.page}</td><td><div class="prob"><i style="width:${Math.max(8,pr*0.6)}px"></i><b class="n">${pr} %</b></div></td><td class="n">${x.words}</td><td class="passage"><mark>${esc(x.text)}</mark></td></tr>`;
+      }).join("")+"</tbody></table>";
+  }else{
+    const r=rows().filter(x=>x.reformulation);
+    if(!r.length){v.innerHTML='<div class="empty"><b>Aucune reformulation</b>Cochez l’option avant l’analyse, ou cliquez sur « Reformuler ».</div>';return}
+    v.innerHTML='<table><thead><tr><th>Page</th><th>Original</th><th>Reformulation proposée</th></tr></thead><tbody>'+
+      r.map(x=>`<tr><td class="n">${x.page}</td><td class="passage"><mark>${esc(x.text)}</mark></td><td>${esc(x.reformulation)}</td></tr>`).join("")+"</tbody></table>";
+  }
+}
+function stats(){
+  const r=rows();
+  if(!done){$("s1").textContent=$("s2").textContent=$("s3").textContent="–";return}
+  const words=r.reduce((a,x)=>a+x.words,0);
+  const mean=r.length?r.reduce((a,x)=>a+x.prob,0)/r.length:0;
+  $("s1").textContent=String(r.length);
+  $("s2").textContent=analysedWords?Math.round(100*words/analysedWords)+" %":"–";
+  $("s3").textContent=r.length?Math.round(mean*100)+" %":"–";
+}
+function setButtons(){
+  $("go").disabled=!hasFile||running;
+  $("stop").disabled=!running;
+  const ok=done&&!running;
+  $("open").disabled=!(ok&&hasOut);
+  $("save").disabled=!(ok&&hasOut);
+  $("exp").disabled=!ok;
+  $("rf").disabled=!(ok&&$("reform").checked&&passages.some(p=>p.flagged));
+}
+function progress(p,m){
+  $("fill").classList.remove("ind");
+  $("fill").style.width=Math.max(0,Math.min(100,p))+"%";
+  $("pct").textContent=Math.round(p)+" %";
+  $("msg").textContent=m;
+}
+function setIndeterminate(on){
+  $("fill").classList.toggle("ind",!!on);
+  if(on){$("pct").textContent="";}
+}
+function selectTab(name){
+  tab=name;
+  document.querySelectorAll(".tab").forEach(b=>b.setAttribute("aria-selected", b.dataset.t===tab));
+  render();
+}
+function fillModels(models, active){
+  const sel=$("model");
+  sel.innerHTML="";
+  (models||[]).forEach(m=>{
+    const o=document.createElement("option");
+    o.value=m.label;
+    o.textContent=m.label;
+    o.dataset.note=m.note||"";
+    sel.appendChild(o);
+  });
+  if(active) sel.value=active;
+  $("mdesc").textContent=sel.selectedOptions[0]?.dataset.note||"";
+}
+function acceptFile(file){
+  hasFile=true; done=false; hasOut=false; passages=[]; analysedWords=0;
+  $("fname").textContent=file.name;
+  const mo=(file.size/1048576).toFixed(1);
+  $("fsub").textContent=mo+" Mo · prêt à analyser";
+  $("drop").classList.add("on");
+  progress(0,"Document chargé. Lancez l’analyse.");
+  setButtons(); stats(); render();
+}
+function showResult(data){
+  running=false;
+  setIndeterminate(false);
+  passages=data.passages||[];
+  analysedWords=data.analysed_words||0;
+  done=analysedWords>0;
+  hasOut=!!data.out_path;
+  $("calib").textContent=data.calibration||"";
+  if(data.cancelled) progress(data.analysed_words?100:0, "Analyse interrompue.");
+  else if(!analysedWords){
+    progress(0,"Le PDF ne contient pas assez de texte sélectionnable.");
+    alert("Aucun passage assez long n’a pu être analysé.\n\nSi le PDF est un scan, faites d’abord une reconnaissance de caractères.");
+  }else{
+    progress(100, data.message||"Analyse terminée.");
+    if(data.french_warning){
+      alert("Ce document ne semble pas être en français. CamemBERTa est conçu pour le français : les résultats ne seront pas fiables. Le modèle XLM-RoBERTa convient mieux à un texte bilingue.");
+    }
+  }
+  if(passages.some(p=>p.reformulation)) selectTab("r");
+  setButtons(); stats(); render();
+}
+function showError(message){
+  running=false;
+  setIndeterminate(false);
+  progress(0,"Erreur.");
+  setButtons();
+  alert(message);
+}
+
+$("model").onchange=()=>$("mdesc").textContent=$("model").selectedOptions[0]?.dataset.note||"";
+$("seuil").oninput=()=>{$("seuilv").textContent=seuil()+" %";stats();render();setButtons()};
+$("reform").onchange=()=>setButtons();
+document.querySelectorAll(".tab").forEach(b=>b.onclick=()=>selectTab(b.dataset.t));
+
+$("drop").onclick=async()=>{
+  if(!window.pywebview) return;
+  const file=await pywebview.api.choose_pdf();
+  if(file) acceptFile(file);
+};
+$("drop").addEventListener("keydown",e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();$("drop").click()}});
+["dragover","dragenter"].forEach(ev=>$("drop").addEventListener(ev,e=>{e.preventDefault();$("drop").classList.add("on")}));
+$("drop").addEventListener("dragleave",()=>{if(!hasFile)$("drop").classList.remove("on")});
+$("drop").addEventListener("drop",async e=>{
+  e.preventDefault();
+  const f=e.dataTransfer&&e.dataTransfer.files&&e.dataTransfer.files[0];
+  const path=f&&(f.path||f.pywebviewFullPath);
+  if(path&&/\.pdf$/i.test(f.name||path)){
+    const file=await pywebview.api.use_pdf(path);
+    if(file) acceptFile(file);
+  }else if(window.pywebview){
+    const file=await pywebview.api.choose_pdf();
+    if(file) acceptFile(file);
+  }
+});
+
+$("go").onclick=async()=>{
+  running=true; done=false; passages=[]; analysedWords=0; hasOut=false;
+  setButtons(); stats(); render();
+  progress(0,"Préparation de l’analyse…");
+  const res=await pywebview.api.analyze(seuil()/100, $("model").value, $("reform").checked);
+  if(!res||!res.ok){running=false;setButtons()}
+};
+$("stop").onclick=()=>pywebview.api.stop();
+$("rf").onclick=async()=>{
+  running=true; setButtons();
+  progress(0,"Préparation de la reformulation…");
+  const res=await pywebview.api.reformulate();
+  if(!res||!res.ok){running=false;setButtons()}
+};
+$("open").onclick=()=>pywebview.api.open_pdf();
+$("save").onclick=()=>pywebview.api.save_pdf();
+$("exp").onclick=()=>pywebview.api.export_report();
+
+async function openSettings(){
+  const s=await pywebview.api.settings_state();
+  $("set-device").value=s.device;
+  $("set-strong").value=s.strong_prob;
+  $("set-batch").value=s.batch_size;
+  $("set-min").value=s.min_words;
+  $("set-target").value=s.target_words;
+  $("set-max").value=s.max_words;
+  const box=$("set-reform");
+  box.innerHTML="";
+  (s.reformulators||[]).forEach(label=>{
+    const o=document.createElement("option");
+    o.value=label; o.textContent=label; box.appendChild(o);
+  });
+  if(s.active_reformulator) box.value=s.active_reformulator;
+  $("set-hf").value="";
+  $("modal").hidden=false;
+}
+$("settings").onclick=()=>{ if(window.pywebview) openSettings() };
+$("set-cancel").onclick=()=>{$("modal").hidden=true};
+$("sheet").onsubmit=async e=>{
+  e.preventDefault();
+  const models=await pywebview.api.save_settings({
+    device:$("set-device").value,
+    strong_prob:+$("set-strong").value,
+    batch_size:+$("set-batch").value,
+    min_words:+$("set-min").value,
+    target_words:+$("set-target").value,
+    max_words:+$("set-max").value,
+    reformulator:$("set-reform").value,
+    new_model:$("set-hf").value.trim()
+  });
+  if(models&&models.error){alert(models.error);return}
+  fillModels(models.models, models.active);
+  $("modal").hidden=true;
+};
+$("modal").onclick=e=>{ if(e.target===$("modal")) $("modal").hidden=true };
+
+async function boot(){
+  if(!window.pywebview||boot.done) return;
+  boot.done=true;
+  const s=await pywebview.api.initial_state();
+  $("gpu").textContent=s.gpu;
+  $("seuil").value=s.threshold;
+  $("seuilv").textContent=s.threshold+" %";
+  $("reform").checked=!!s.reformulate;
+  fillModels(s.models, s.active);
+  setButtons();
+}
+window.addEventListener("pywebviewready", boot);
+if(window.pywebview) boot();
+render(); stats();
+</script>
+</body>
+</html>
